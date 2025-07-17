@@ -1,8 +1,10 @@
 # Loopia Domain Grabber
 
-A command-line tool to snipe expiring domains from Loopia. This tool attempts to register domains the instant Loopia releases them (usually at 04:00 UTC for .se/.nu domains).
+A command-line tool to snipe expiring domains from Loopia. This tool attempts to register domains the instant the registry releases them (usually at 04:00 UTC for .se/.nu domains).
 
-The tool uses a sophisticated retry mechanism that fires the first order 30ms before the drop time, performs five ultra-fast retries, then switches to exponential back-off for up to one hour. This maximizes the chances of successfully registering high-demand domains.
+The tool uses a sophisticated retry mechanism that fires the first order before the drop time if configured, performs five ultra-fast retries, then switches to exponential back-off for up to one hour.
+
+You can find .se and .nu domains that will expire soon here: https://internetstiftelsen.se/domaner/registrera-ett-domannamn/se-och-nu-domaner-som-snart-kan-bli-lediga/
 
 ## Features
 
@@ -11,11 +13,13 @@ The tool uses a sophisticated retry mechanism that fires the first order 30ms be
 - Keeps your computer awake during the registration process
 - Configurable via command-line flags or a JSON configuration file
 - Detailed logging of all registration attempts
+- Respects API rate limits (60 calls per hour)
+- Automatically stops sending requests on authentication (401) or rate limit (429) errors
 
 ## Installation
 
 ```bash
-go get github.com/yourusername/loopiaDomainGrabber
+go get github.com/uberswe/loopiaDomainGrabber
 ```
 
 ## Usage
@@ -38,9 +42,8 @@ Create a `config.json` file:
   "username": "apiuser@loopiaapi",
   "password": "your_password_here",
   "domains": [
-    "maxgains.se",
-    "996.se",
-    "3dlab.se"
+    "domain.se",
+    "domain.nu"
   ]
 }
 ```
@@ -79,9 +82,20 @@ The tool employs a sophisticated retry strategy to maximize the chances of succe
 
 The tool uses Go's goroutines to attempt registration of multiple domains concurrently, maximizing efficiency when trying to register several domains at once.
 
+## API Limitations
+
+The tool respects the Loopia API limitations and implements safeguards to prevent issues:
+
+- **Rate Limiting**: The tool enforces a maximum of 60 API calls per hour across all domains
+- **Error Handling**: If the tool receives a 401 (Unauthorized) or 429 (Too Many Requests) error, it will:
+  - Log the error with details
+  - Stop sending further API requests to prevent account lockout
+  - Abort all pending domain registration attempts
+
 ## Notes
 
 - The tool will wait until the next drop time (04:00 UTC) unless the `-now` flag is specified
+- While waiting, the tool rechecks the time every 10 minutes to ensure accuracy even during long waits
 - The `-keep-awake` flag will move the mouse a few pixels every minute to prevent the computer from sleeping
 - Multiple domains can be registered concurrently using goroutines
 - The tool will attempt to register domains for up to one hour before giving up

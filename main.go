@@ -42,15 +42,16 @@ import (
 )
 
 const (
-	loopiaEndpoint    = "https://api.loopia.se/RPCSERV"
-	fastRetryCount    = 5 // number of immediate retries after drop
-	fastRetryInterval = 100 * time.Millisecond
-	initialBackoff    = 1 * time.Second // starting back‑off interval
-	maxBackoff        = 5 * time.Minute // cap for exponential back‑off
-	purchasingWindow  = 1 * time.Hour   // keep trying for at most one hour
-	preDroplead       = 0 * time.Millisecond
-	dropHourUTC       = 4               // 04:00 UTC is when .se/.nu domains are dropped
-	keepAwakeInterval = 1 * time.Minute // interval for mouse movement to keep computer awake
+	loopiaEndpoint      = "https://api.loopia.se/RPCSERV"
+	fastRetryCount      = 3 // number of immediate retries after drop
+	fastRetryInterval   = 500 * time.Millisecond
+	initialBackoff      = 1 * time.Second // starting back‑off interval
+	maxBackoff          = 5 * time.Minute // cap for exponential back‑off
+	purchasingWindow    = 1 * time.Hour   // keep trying for at most one hour
+	preDroplead         = 0 * time.Millisecond
+	dropHourUTC         = 4                // 04:00 UTC is when .se/.nu domains are dropped
+	keepAwakeInterval   = 1 * time.Minute  // interval for mouse movement to keep computer awake
+	timeRecheckInterval = 10 * time.Minute // interval to recheck time while waiting for drop time
 )
 
 // Default configuration file name
@@ -77,6 +78,12 @@ type LoopiaClient struct {
 	password string
 	rpc      *xmlrpc.Client
 	dryRun   bool // if true, no RPC is executed (timing only)
+
+	// Rate limiting
+	callsMutex      sync.Mutex
+	callsThisHour   int
+	hourStartTime   time.Time
+	stopOnErrorCode bool // if true, stop sending requests on 401 or 429 errors
 }
 
 func NewLoopiaClient(username, password string, dry bool) (*LoopiaClient, error) {
@@ -88,10 +95,13 @@ func NewLoopiaClient(username, password string, dry bool) (*LoopiaClient, error)
 		return nil, err
 	}
 	return &LoopiaClient{
-		username: username,
-		password: password,
-		rpc:      c,
-		dryRun:   dry,
+		username:        username,
+		password:        password,
+		rpc:             c,
+		dryRun:          dry,
+		callsThisHour:   0,
+		hourStartTime:   time.Now(),
+		stopOnErrorCode: true,
 	}, nil
 }
 
@@ -113,9 +123,49 @@ func (c *LoopiaClient) call(method string, params ...interface{}) (interface{}, 
 		return "OK", nil
 	}
 
+	// Rate limiting check
+	c.callsMutex.Lock()
+
+	// Check if we need to reset the hour counter
+	now := time.Now()
+	if now.Sub(c.hourStartTime) >= time.Hour {
+		reqLogger.Info().
+			Int("previous_hour_calls", c.callsThisHour).
+			Time("new_hour_start", now).
+			Msg("Resetting API call counter for new hour")
+		c.callsThisHour = 0
+		c.hourStartTime = now
+	}
+
+	// Check if we've reached the limit
+	if c.callsThisHour >= 60 {
+		c.callsMutex.Unlock()
+		errMsg := "API call limit of 60 calls per hour reached"
+		reqLogger.Error().
+			Int("calls_this_hour", c.callsThisHour).
+			Time("hour_start", c.hourStartTime).
+			Time("hour_end", c.hourStartTime.Add(time.Hour)).
+			Msg(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	// Check if we should stop due to previous error
+	if c.stopOnErrorCode {
+		// We'll check this flag but still allow the call to proceed
+		// This way the application can decide what to do with the error
+		reqLogger.Warn().
+			Msg("Making API call despite previous 401/429 error")
+	}
+
+	// Increment the counter
+	c.callsThisHour++
+	callNumber := c.callsThisHour
+	c.callsMutex.Unlock()
+
 	// Log the request details
 	reqLogger.Info().
 		Interface("params", params).
+		Int("calls_this_hour", callNumber).
 		Msg("Sending API request")
 
 	// Record the start time for precise timing
@@ -138,6 +188,18 @@ func (c *LoopiaClient) call(method string, params ...interface{}) (interface{}, 
 		respLogger.Error().
 			Err(err).
 			Msg("API call failed")
+
+		// Check for specific error codes
+		if errStr := err.Error(); errStr == "401 Unauthorized" || errStr == "429 Too Many Requests" {
+			c.callsMutex.Lock()
+			c.stopOnErrorCode = true
+			c.callsMutex.Unlock()
+
+			respLogger.Error().
+				Str("error_code", errStr).
+				Msg("Received critical error code, stopping further API calls")
+		}
+
 		return nil, err
 	}
 
@@ -246,6 +308,19 @@ func (c *LoopiaClient) payInvoiceIfAny(domain string) error {
 func (c *LoopiaClient) attempt(domain string) error {
 	attemptStart := time.Now()
 
+	// Check if we should stop due to previous 401/429 error
+	c.callsMutex.Lock()
+	if c.stopOnErrorCode {
+		c.callsMutex.Unlock()
+		errMsg := "Aborting attempt due to previous 401/429 error"
+		log.Error().
+			Str("domain", domain).
+			Str("operation", "registration_attempt").
+			Msg(errMsg)
+		return errors.New(errMsg)
+	}
+	c.callsMutex.Unlock()
+
 	log.Info().
 		Str("domain", domain).
 		Str("operation", "registration_attempt").
@@ -316,9 +391,9 @@ func keepAwake(ctx context.Context) {
 			return
 		case <-ticker.C:
 			x, y := robotgo.GetMousePos()
-			dx := rand.Intn(5) - 2 // Random value between -2 and 2
-			dy := rand.Intn(5) - 2 // Random value between -2 and 2
-			robotgo.MoveMouseSmooth(x+dx, y+dy)
+			dx := rand.Intn(20) - 10
+			dy := rand.Intn(20) - 10 // Random value between -2 and 2
+			robotgo.MoveSmooth(x+dx, y+dy)
 
 		}
 	}
@@ -484,6 +559,10 @@ func main() {
 	drop := nextDrop(now)
 	firstShot := drop.Add(-preDroplead)
 
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), firstShot.Sub(now)+purchasingWindow)
+	defer cancel()
+
 	if *startNow {
 		// If -now flag is set, start immediately
 		firstShot = time.Now()
@@ -493,16 +572,46 @@ func main() {
 			Dur("wait_time", wait).
 			Str("first_attempt_time", firstShot.UTC().Format(time.RFC3339Nano)).
 			Msg("Waiting until first attempt")
-		time.Sleep(wait)
-	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), purchasingWindow)
-	defer cancel()
+		// Start keep-awake routine if requested
+		if *keepAwakeFlag {
+			go keepAwake(ctx)
+		}
 
-	// Start keep-awake routine if requested
-	if *keepAwakeFlag {
-		go keepAwake(ctx)
+		// Wait with periodic time rechecking
+		for {
+			// Recalculate the current time and drop time
+			now = time.Now()
+			drop = nextDrop(now)
+			firstShot = drop.Add(-preDroplead)
+
+			// Calculate the new wait time
+			wait = time.Until(firstShot)
+
+			// If it's time to start or less than a minute left, break the loop
+			if wait <= 0 || wait < timeRecheckInterval {
+				break
+			}
+
+			// Sleep for the shorter of the wait time or the recheck interval
+			sleepTime := wait
+			if sleepTime > timeRecheckInterval {
+				sleepTime = timeRecheckInterval
+			}
+
+			log.Info().
+				Dur("sleep_time", sleepTime).
+				Dur("remaining_wait", wait).
+				Str("updated_first_attempt_time", firstShot.UTC().Format(time.RFC3339Nano)).
+				Msg("Sleeping and will recheck time")
+
+			time.Sleep(sleepTime)
+		}
+
+		// Final sleep for any remaining time (less than a minute)
+		if wait := time.Until(firstShot); wait > 0 {
+			time.Sleep(wait)
+		}
 	}
 
 	// Create channel for results
