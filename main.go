@@ -43,8 +43,8 @@ import (
 
 const (
 	loopiaEndpoint      = "https://api.loopia.se/RPCSERV"
-	fastRetryCount      = 3 // number of immediate retries after drop
-	fastRetryInterval   = 500 * time.Millisecond
+	fastRetryCount      = 1 // number of immediate retries after drop
+	fastRetryInterval   = 7000 * time.Millisecond
 	initialBackoff      = 1 * time.Second // starting back‑off interval
 	maxBackoff          = 5 * time.Minute // cap for exponential back‑off
 	purchasingWindow    = 1 * time.Hour   // keep trying for at most one hour
@@ -80,10 +80,11 @@ type LoopiaClient struct {
 	dryRun   bool // if true, no RPC is executed (timing only)
 
 	// Rate limiting
-	callsMutex      sync.Mutex
-	callsThisHour   int
-	hourStartTime   time.Time
-	stopOnErrorCode bool // if true, stop sending requests on 401 or 429 errors
+	callsMutex    sync.Mutex
+	callsThisHour int
+	hourStartTime time.Time
+	stopOn401     bool // if true, stop sending requests on 401 Unauthorized errors
+	stopOn429     bool // if true, stop sending requests on 429 Too Many Requests errors
 }
 
 func NewLoopiaClient(username, password string, dry bool) (*LoopiaClient, error) {
@@ -95,13 +96,14 @@ func NewLoopiaClient(username, password string, dry bool) (*LoopiaClient, error)
 		return nil, err
 	}
 	return &LoopiaClient{
-		username:        username,
-		password:        password,
-		rpc:             c,
-		dryRun:          dry,
-		callsThisHour:   0,
-		hourStartTime:   time.Now(),
-		stopOnErrorCode: true,
+		username:      username,
+		password:      password,
+		rpc:           c,
+		dryRun:        dry,
+		callsThisHour: 0,
+		hourStartTime: time.Now(),
+		stopOn401:     false,
+		stopOn429:     false,
 	}, nil
 }
 
@@ -150,11 +152,22 @@ func (c *LoopiaClient) call(method string, params ...interface{}) (interface{}, 
 	}
 
 	// Check if we should stop due to previous error
-	if c.stopOnErrorCode {
-		// We'll check this flag but still allow the call to proceed
+	if c.stopOn401 || c.stopOn429 {
+		// We'll check these flags but still allow the call to proceed
 		// This way the application can decide what to do with the error
+		errorType := ""
+		if c.stopOn401 {
+			errorType = "401 Unauthorized"
+		}
+		if c.stopOn429 {
+			if errorType != "" {
+				errorType += " or "
+			}
+			errorType += "429 Too Many Requests"
+		}
 		reqLogger.Warn().
-			Msg("Making API call despite previous 401/429 error")
+			Str("error_type", errorType).
+			Msg("Making API call despite previous error")
 	}
 
 	// Increment the counter
@@ -190,14 +203,21 @@ func (c *LoopiaClient) call(method string, params ...interface{}) (interface{}, 
 			Msg("API call failed")
 
 		// Check for specific error codes
-		if errStr := err.Error(); errStr == "401 Unauthorized" || errStr == "429 Too Many Requests" {
+		errStr := err.Error()
+		if errStr == "401 Unauthorized" || errStr == "429 Too Many Requests" {
 			c.callsMutex.Lock()
-			c.stopOnErrorCode = true
+			if errStr == "401 Unauthorized" {
+				c.stopOn401 = true
+				respLogger.Error().
+					Str("error_code", errStr).
+					Msg("Received 401 Unauthorized error, stopping further API calls")
+			} else if errStr == "429 Too Many Requests" {
+				c.stopOn429 = true
+				respLogger.Error().
+					Str("error_code", errStr).
+					Msg("Received 429 Too Many Requests error, stopping further API calls")
+			}
 			c.callsMutex.Unlock()
-
-			respLogger.Error().
-				Str("error_code", errStr).
-				Msg("Received critical error code, stopping further API calls")
 		}
 
 		return nil, err
@@ -308,14 +328,24 @@ func (c *LoopiaClient) payInvoiceIfAny(domain string) error {
 func (c *LoopiaClient) attempt(domain string) error {
 	attemptStart := time.Now()
 
-	// Check if we should stop due to previous 401/429 error
+	// Check if we should stop due to previous 401 or 429 error
 	c.callsMutex.Lock()
-	if c.stopOnErrorCode {
+	var errMsg string
+	if c.stopOn401 && c.stopOn429 {
+		errMsg = "Aborting attempt due to previous 401 Unauthorized and 429 Too Many Requests errors"
+	} else if c.stopOn401 {
+		errMsg = "Aborting attempt due to previous 401 Unauthorized error"
+	} else if c.stopOn429 {
+		errMsg = "Aborting attempt due to previous 429 Too Many Requests error"
+	}
+
+	if errMsg != "" {
 		c.callsMutex.Unlock()
-		errMsg := "Aborting attempt due to previous 401/429 error"
 		log.Error().
 			Str("domain", domain).
 			Str("operation", "registration_attempt").
+			Bool("stopOn401", c.stopOn401).
+			Bool("stopOn429", c.stopOn429).
 			Msg(errMsg)
 		return errors.New(errMsg)
 	}
@@ -614,30 +644,42 @@ func main() {
 		}
 	}
 
-	// Create channel for results
-	resultCh := make(chan Result, len(config.Domains))
+	// Create slice to store results
+	var results []Result
 
-	// Start a goroutine for each domain
-	var wg sync.WaitGroup
-	for _, d := range config.Domains {
-		wg.Add(1)
-		go func(domain string) {
-			defer wg.Done()
-			attemptDomainRegistration(ctx, client, domain, firstShot, resultCh)
-		}(d)
+	// Process domains sequentially
+	log.Info().Int("domains", len(config.Domains)).Msg("Processing domains sequentially")
+
+	for _, domain := range config.Domains {
+		// Create a separate context for each domain to prevent cancellation affecting other domains
+		domainCtx, domainCancel := context.WithTimeout(context.Background(), purchasingWindow)
+
+		// Create a channel for this domain's result
+		resultCh := make(chan Result, 1)
+
+		log.Info().Str("domain", domain).Msg("Starting registration attempt for domain")
+
+		// Process this domain
+		attemptDomainRegistration(domainCtx, client, domain, firstShot, resultCh)
+
+		// Get the result
+		result := <-resultCh
+		results = append(results, result)
+
+		// Clean up the context
+		domainCancel()
+
+		log.Info().
+			Str("domain", domain).
+			Bool("success", result.Success).
+			Msg("Completed registration attempt for domain")
 	}
-
-	// Wait for all goroutines to finish in a separate goroutine
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
 
 	// Process results
 	successCount := 0
 	failCount := 0
 
-	for result := range resultCh {
+	for _, result := range results {
 		if result.Success {
 			successCount++
 			log.Info().Str("domain", result.Domain).Msg("Domain registration successful")
