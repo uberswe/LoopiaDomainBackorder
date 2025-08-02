@@ -1,37 +1,141 @@
 # Loopia Domain Grabber
 
-A command-line tool to snipe expiring domains from Loopia. This tool attempts to register domains the instant the registry releases them (usually at 04:00 UTC for .se/.nu domains).
+A command-line tool for working with domains from Loopia. It provides two main commands:
 
-The tool uses a sophisticated retry mechanism that fires the first order before the drop time if configured, performs five ultra-fast retries, then switches to exponential back-off for up to one hour.
+1. **dropcatch** - Snipes expiring domains the instant the registry releases them (usually at 04:00 UTC for .se/.nu domains).
+2. **available** - Downloads domain lists, checks for domains expiring tomorrow, and evaluates them based on criteria like length and pronounceability.
 
 You can find .se and .nu domains that will expire soon here: https://internetstiftelsen.se/domaner/registrera-ett-domannamn/se-och-nu-domaner-som-snart-kan-bli-lediga/
 
+## Project Structure
+
+The project follows standard Go project layout conventions:
+
+```
+loopiaDomainGrabber/
+├── cmd/                    # Command-line applications
+│   └── loopiaDomainGrabber/  # Main application entry point
+├── internal/               # Private application code
+│   ├── available/          # Available command implementation
+│   └── dropcatch/          # Dropcatch command implementation
+├── pkg/                    # Public libraries that can be imported
+│   ├── api/                # Loopia API client
+│   ├── config/             # Configuration handling
+│   ├── domain/             # Domain-related models
+│   └── util/               # Utility functions
+├── build/                  # Build artifacts (created by Makefile)
+├── Makefile                # Build automation
+├── go.mod                  # Go module definition
+├── go.sum                  # Go module checksums
+├── config.json             # Configuration file
+└── README.md               # This file
+```
+
 ## Features
 
-- Attempts to register domains at the exact moment they become available
-- Supports multiple domains with concurrent registration attempts
-- Keeps your computer awake during the registration process
-- Configurable via command-line flags or a JSON configuration file
-- Detailed logging of all registration attempts
-- Respects API rate limits (60 calls per hour)
-- Automatically stops sending requests on authentication (401) or rate limit (429) errors
+- **Dropcatch Command**:
+  - Attempts to register domains at the exact moment they become available
+  - Uses a sophisticated retry mechanism with fast retries and exponential back-off
+  - Supports multiple domains with concurrent registration attempts
+  - Keeps your computer awake during the registration process
+
+- **Available Command**:
+  - Downloads domain lists from Internetstiftelsen
+  - Caches the lists for 24 hours to reduce bandwidth usage
+  - Identifies domains expiring tomorrow
+  - Evaluates domains based on length, pronounceability, and other factors
+  - Ranks and displays the most valuable domains
+
+- **General Features**:
+  - Configurable via command-line flags or a JSON configuration file
+  - Detailed logging of all operations
+  - Respects API rate limits (60 calls per hour)
+  - Automatically stops sending requests on authentication (401) or rate limit (429) errors
 
 ## Installation
 
+### From Source
+
+1. Clone the repository:
 ```bash
-go get github.com/uberswe/loopiaDomainGrabber
+git clone https://github.com/yourusername/loopiaDomainGrabber.git
+cd loopiaDomainGrabber
+```
+
+2. Build the application:
+```bash
+make build
+```
+
+This will create the executable in the `build` directory.
+
+### Using Go Install
+
+```bash
+go install github.com/yourusername/loopiaDomainGrabber/cmd/loopiaDomainGrabber@latest
 ```
 
 ## Usage
 
-### Using Command-line Flags
+The application provides a Makefile for common operations:
 
 ```bash
-# Register a single domain using environment variables for credentials
+# Show available commands
+make help
+
+# Build the application
+make build
+
+# Run tests
+make test
+
+# Clean build artifacts
+make clean
+```
+
+### Dropcatch Command
+
+The dropcatch command attempts to register domains as they expire.
+
+```bash
+# Using the Makefile
+make run-dropcatch ARGS="-domain example.se -keep-awake"
+
+# Using the built executable
+./build/loopiaDomainGrabber dropcatch -domain example.se -keep-awake
+
+# Using environment variables for credentials
 export LOOPIA_USERNAME="apiuser@loopiaapi"
 export LOOPIA_PASSWORD="secret"
-go run main.go -domain example.se -keep-awake
+./build/loopiaDomainGrabber dropcatch -domain example.se -keep-awake
 ```
+
+#### Dropcatch Command Flags
+
+- `-domain string`: Domain to register (can be specified in addition to domains in config file)
+- `-dry`: Simulate calls without touching the API
+- `-now`: Start registration attempts immediately instead of waiting for drop time
+- `-keep-awake`: Keep computer awake by moving mouse periodically
+- `-config string`: Path to configuration file (default "config.json")
+
+### Available Command
+
+The available command downloads domain lists, checks for domains expiring tomorrow, and evaluates them based on various criteria.
+
+```bash
+# Using the Makefile
+make run-available
+
+# Using the built executable
+./build/loopiaDomainGrabber available
+
+# With a custom config file
+./build/loopiaDomainGrabber available -config custom-config.json
+```
+
+#### Available Command Flags
+
+- `-config string`: Path to configuration file (default "config.json")
 
 ### Using Configuration File
 
@@ -44,25 +148,12 @@ Create a `config.json` file:
   "domains": [
     "domain.se",
     "domain.nu"
-  ]
+  ],
+  "cache_dir": "cache"
 }
 ```
 
 The configuration file should be placed in the same directory as the executable. The file is automatically loaded when the program starts.
-
-Then run:
-
-```bash
-go run main.go -keep-awake
-```
-
-## Command-line Flags
-
-- `-domain string`: Domain to register (can be specified in addition to domains in config file)
-- `-dry`: Simulate calls without touching the API
-- `-now`: Start registration attempts immediately instead of waiting for drop time
-- `-keep-awake`: Keep computer awake by moving mouse periodically
-- `-config string`: Path to configuration file (default "config.json")
 
 ## How It Works
 

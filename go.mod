@@ -1,4 +1,4 @@
-module loopiaDomainBuyer
+module github.com/uberswe/LoopiaDomainBackorder
 
 go 1.24
 
