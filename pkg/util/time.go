@@ -32,15 +32,28 @@ func NextDrop(now time.Time) time.Time {
 }
 
 // GetReferenceDate returns the reference date for determining which domains are expiring today.
-// It uses the local date of the provided time and returns that date at midnight UTC.
-// This ensures that "today" means the current local date, regardless of UTC time.
-// 
+// If the current UTC time is after the drop time (4 AM UTC), it returns the next day's date
+// to show domains for the next release date.
+//
 // IMPORTANT: Always pass local time (time.Now()) to this function, not UTC time (time.Now().UTC()).
 // Using UTC time would cause the function to use the wrong date if the local time is in a different day
 // than the UTC time (e.g., at 00:38 CEST, which is 22:38 UTC of the previous day).
 func GetReferenceDate(now time.Time) time.Time {
-	// Use the local date (year, month, day) but create a UTC time
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// Convert to UTC to check against drop time
+	utcNow := now.UTC()
+
+	// Get the current local date at midnight UTC
+	localDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	// Check if current UTC time is after today's drop time (4 AM UTC)
+	todayDropTime := time.Date(utcNow.Year(), utcNow.Month(), utcNow.Day(), DropHourUTC, 0, 0, 0, time.UTC)
+
+	// If current time is after today's drop time, return tomorrow's date
+	if utcNow.After(todayDropTime) {
+		return localDate.Add(24 * time.Hour)
+	}
+
+	return localDate
 }
 
 // KeepAwake keeps the computer awake by simulating mouse movement every minute.

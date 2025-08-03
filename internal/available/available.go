@@ -225,14 +225,14 @@ func displayTopDomains(domains []domain.DomainInfo) {
 	fmt.Println("======================================")
 
 	// Print header with explanation
-	fmt.Println("Scoring factors:")
-	fmt.Println("- Length: Shorter domains are better (2-3 chars are ideal)")
-	fmt.Println("- Pattern: Letter-only domains (dv) > Letter+Number domains (d7) > Longer domains (dtv)")
-	fmt.Println("- Dashes: Domains with dashes are penalized")
-	fmt.Println("- TLD: Popular TLDs (.com, .net, .org) are preferred")
-	fmt.Println("- Brand: Combination of pronounceability and memorability")
-	fmt.Println("- Keyword: Domains containing valuable keywords get a bonus")
-	fmt.Println()
+	//fmt.Println("Scoring factors:")
+	//fmt.Println("- Length: Shorter domains are better (2-3 chars are ideal)")
+	//fmt.Println("- Pattern: Letter-only domains (dv) > Letter+Number domains (d7) > Longer domains (dtv)")
+	//fmt.Println("- Dashes: Domains with dashes are penalized")
+	//fmt.Println("- TLD: Popular TLDs (.com, .net, .org) are preferred")
+	//fmt.Println("- Brand: Combination of pronounceability and memorability")
+	//fmt.Println("- Keyword: Domains containing valuable keywords get a bonus")
+	//fmt.Println()
 
 	// Print column headers
 	fmt.Printf("%-4s %-20s %-7s %-7s %-7s %-7s %-7s %-7s %s\n",
@@ -245,48 +245,44 @@ func displayTopDomains(domains []domain.DomainInfo) {
 	}
 
 	for i := 0; i < maxToShow; i++ {
-		domain := domains[i]
+		d := domains[i]
 
-		// Determine domain type
+		// Determine d type
 		domainType := "Standard"
-		if domain.IsLetterOnly && domain.Length <= 3 {
+		if d.IsLetterOnly && d.Length <= 3 {
 			domainType = "Premium (Letter-only)"
-		} else if domain.IsLetterNumber && domain.Length == 2 {
+		} else if d.IsLetterNumber && d.Length == 2 {
 			domainType = "Premium (Letter+Number)"
-		} else if domain.Length <= 3 {
+		} else if d.Length <= 3 {
 			domainType = "Premium (Ultra-short)"
-		} else if domain.Length <= 5 {
+		} else if d.Length <= 5 {
 			domainType = "Premium (Short)"
-		} else if domain.HasDash {
+		} else if d.HasDash {
 			domainType = "Standard (Has Dash)"
 		}
 
 		// Format dash penalty for display (show 0 if no penalty)
 		dashPenalty := "-"
-		if domain.HasDash {
-			dashPenalty = fmt.Sprintf("%.2f", domain.DashPenalty)
+		if d.HasDash {
+			dashPenalty = fmt.Sprintf("%.2f", d.DashPenalty)
 		}
 
 		// Format keyword score for display (show - if no keywords)
 		keywordScore := "-"
-		if domain.KeywordScore > 0 {
-			keywordScore = fmt.Sprintf("%.2f", domain.KeywordScore)
+		if d.KeywordScore > 0 {
+			keywordScore = fmt.Sprintf("%.2f", d.KeywordScore)
 		}
 
-		// Print domain with all scoring components
+		// Print d with all scoring components
 		fmt.Printf("%-4d %-20s %-7.2f %-7.2f %-7.2f %-7.2f %-7s %-7s %s\n",
 			i+1,
-			domain.Name,
-			domain.Score,
-			domain.LengthScore,
-			domain.TLDScore,
-			domain.BrandabilityScore,
+			d.Name,
+			d.Score,
+			d.LengthScore,
+			d.TLDScore,
+			d.BrandabilityScore,
 			keywordScore,
 			dashPenalty,
 			domainType)
 	}
-
-	// Print a note about the example domains from the requirements
-	fmt.Println("\nNote: According to the scoring criteria, domains should rank as follows:")
-	fmt.Println("dv.se > d7.se > dtv.se (letter-only > letter+number > longer domains)")
 }
