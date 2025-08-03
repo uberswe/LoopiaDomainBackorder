@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*' # Trigger on tags starting with 'v'
   workflow_dispatch: # Allow manual triggering
@@ -19,6 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Fetch all history for tags and branches
+          token: ${{ secrets.GITHUB_TOKEN }} # Use the GitHub token for authentication
       
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -26,7 +29,7 @@ jobs:
           go-version: '1.24'
           check-latest: true
       
-      - name: Get version from tag
+      - name: Get version from source or tag
         id: get_version
         run: |
           # If triggered by a tag, use the tag name without the 'v' prefix
@@ -34,6 +37,28 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
             echo "VERSION=$VERSION" >> $GITHUB_ENV
             echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Version from tag: $VERSION"
+          # If triggered by a push to main, extract version from main.go
+          elif [[ $GITHUB_REF == refs/heads/main ]]; then
+            # Extract Version from main.go
+            VERSION=$(grep -oP 'Version = "\K[^"]+' cmd/loopiaDomainGrabber/main.go)
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            
+            # Check if this version already has a tag
+            if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+              echo "Tag v$VERSION already exists, skipping tag creation"
+            else
+              # Create a new tag for this release
+              git config --local user.email "action@github.com"
+              git config --local user.name "GitHub Action"
+              git tag -a "v$VERSION" -m "Release v$VERSION"
+              echo "Created new tag: v$VERSION"
+              
+              # Push the tag to the repository
+              git push origin "v$VERSION"
+            fi
+            echo "Version from code: $VERSION"
           else
             # If manually triggered, generate a version based on the latest tag
             LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -47,8 +72,11 @@ jobs:
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
             git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+            echo "Generated new version: $NEW_VERSION"
+            
+            # Push the tag to the repository
+            git push origin "v$NEW_VERSION"
           fi
-          echo "Version: $VERSION"
       
       - name: Get commit hash
         id: get_commit_hash
