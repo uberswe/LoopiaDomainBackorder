@@ -3,11 +3,10 @@ package util
 
 import (
 	"context"
-	"math/rand"
-	"time"
-
 	"github.com/go-vgo/robotgo"
 	"github.com/rs/zerolog/log"
+	"math/rand"
+	"time"
 )
 
 const (

@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies for robotgo
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev xorg-dev libxtst-dev libpng-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install -y libx11-dev xorg-dev libxtst-dev libpng-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev gcc-mingw-w64 gcc-multilib
       
       - name: Get version from source or tag
         id: get_version
