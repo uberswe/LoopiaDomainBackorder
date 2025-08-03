@@ -68,6 +68,7 @@ The easiest way to install loopiaDomainGrabber is to download a pre-built binary
    - `loopiaDomainGrabber-darwin-amd64.zip` for macOS (Intel)
    - `loopiaDomainGrabber-darwin-arm64.zip` for macOS (Apple Silicon)
    - `loopiaDomainGrabber-windows-amd64.zip` for Windows (64-bit)
+   - `loopiaDomainGrabber-windows-386.zip` for Windows (32-bit)
 
 2. Extract the zip file to get the executable.
 

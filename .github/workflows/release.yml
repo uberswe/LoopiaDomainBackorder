@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies for robotgo
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev xorg-dev libxtst-dev libpng-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev gcc-mingw-w64 gcc-multilib
+          sudo apt-get install -y libx11-dev xorg-dev libxtst-dev libpng-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev gcc-mingw-w64 gcc-multilib libz-mingw-w64-dev
       
       - name: Get version from source or tag
         id: get_version
@@ -112,7 +112,10 @@ jobs:
           GOOS=darwin GOARCH=arm64 go build -ldflags="-X 'main.Version=${{ env.VERSION }}' -X 'main.Commit=${{ env.COMMIT_HASH }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}'" -o dist/loopiaDomainGrabber-darwin-arm64 ./cmd/loopiaDomainGrabber
           
           # Build for Windows (amd64)
-          GOOS=windows GOARCH=amd64 go build -ldflags="-X 'main.Version=${{ env.VERSION }}' -X 'main.Commit=${{ env.COMMIT_HASH }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}'" -o dist/loopiaDomainGrabber-windows-amd64.exe ./cmd/loopiaDomainGrabber
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ go build -ldflags="-X 'main.Version=${{ env.VERSION }}' -X 'main.Commit=${{ env.COMMIT_HASH }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}'" -o dist/loopiaDomainGrabber-windows-amd64.exe ./cmd/loopiaDomainGrabber
+          
+          # Build for Windows (386)
+          GOOS=windows GOARCH=386 CGO_ENABLED=1 CC=i686-w64-mingw32-gcc CXX=i686-w64-mingw32-g++ go build -ldflags="-X 'main.Version=${{ env.VERSION }}' -X 'main.Commit=${{ env.COMMIT_HASH }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}'" -o dist/loopiaDomainGrabber-windows-386.exe ./cmd/loopiaDomainGrabber
           
           # Create zip archives for each binary
           cd dist
@@ -120,6 +123,7 @@ jobs:
           zip -r loopiaDomainGrabber-darwin-amd64.zip loopiaDomainGrabber-darwin-amd64
           zip -r loopiaDomainGrabber-darwin-arm64.zip loopiaDomainGrabber-darwin-arm64
           zip -r loopiaDomainGrabber-windows-amd64.zip loopiaDomainGrabber-windows-amd64.exe
+          zip -r loopiaDomainGrabber-windows-386.zip loopiaDomainGrabber-windows-386.exe
       
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -134,3 +138,4 @@ jobs:
             dist/loopiaDomainGrabber-darwin-amd64.zip
             dist/loopiaDomainGrabber-darwin-arm64.zip
             dist/loopiaDomainGrabber-windows-amd64.zip
+            dist/loopiaDomainGrabber-windows-386.zip
