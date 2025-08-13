@@ -135,7 +135,7 @@ func main() {
 		fmt.Println("Usage: loopiaDomainGrabber <command> [options]")
 		fmt.Println("Commands:")
 		fmt.Println("  dropcatch   Attempt to register domains as they expire")
-		fmt.Println("  available   Find valuable domains expiring today")
+		fmt.Println("  available   Find valuable domains expiring today or on a specified date")
 		fmt.Println("  version     Display version information")
 		fmt.Println("Run 'loopiaDomainGrabber <command> -h' for command-specific help")
 		os.Exit(1)
@@ -183,6 +183,9 @@ func main() {
 		dropcatch.Run(cfg, *domain, *dry, *startNow, *keepAwakeFlag)
 
 	case "available":
+		// Define available-specific flags
+		dateStr := flag.String("date", "", "Date to check for expiring domains (format: YYYY-MM-DD)")
+
 		// Parse flags
 		flag.Parse()
 
@@ -193,7 +196,7 @@ func main() {
 		}
 
 		// Run available command
-		available.Run(cfg)
+		available.Run(cfg, *dateStr)
 
 	case "version":
 		// Display version information

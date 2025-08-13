@@ -24,8 +24,12 @@ var domainListURLs = []string{
 }
 
 // Run handles the available command functionality
-func Run(cfg *domain.Config) {
-	log.Info().Msg("Running available command to find valuable domains expiring today")
+func Run(cfg *domain.Config, dateStr string) {
+	if dateStr == "" {
+		log.Info().Msg("Running available command to find valuable domains expiring today")
+	} else {
+		log.Info().Str("date", dateStr).Msg("Running available command to find valuable domains expiring on specified date")
+	}
 
 	// Check if we need to download new files (cache expired)
 	needsDownload := true
@@ -62,7 +66,7 @@ func Run(cfg *domain.Config) {
 	}
 
 	// Process domain lists
-	domains := processDomainLists(cfg)
+	domains := processDomainLists(cfg, dateStr)
 
 	// Display top domains
 	displayTopDomains(domains)
@@ -116,13 +120,30 @@ func downloadDomainLists(cfg *domain.Config) {
 // processDomainLists processes the cached domain lists and returns domains expiring on the reference date.
 // The reference date is determined by the local date (not UTC date) to ensure that domains expiring
 // "today" are correctly identified regardless of the user's time zone.
-func processDomainLists(cfg *domain.Config) []domain.DomainInfo {
+// If dateStr is provided, it will be used as the reference date instead of the current date.
+func processDomainLists(cfg *domain.Config, dateStr string) []domain.DomainInfo {
 	var domains []domain.DomainInfo
-	// Use local time (not UTC) to ensure we get the correct reference date based on the user's local date.
-	// This is crucial for correct operation when the local date differs from the UTC date
-	// (e.g., at 00:38 CEST, which is 22:38 UTC of the previous day).
+	var referenceDate time.Time
+
+	// Get the current time for logging and fallback
 	now := time.Now()
-	referenceDate := util.GetReferenceDate(now)
+
+	if dateStr != "" {
+		// Parse the provided date string
+		parsedDate, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			log.Error().Err(err).Str("date", dateStr).Msg("Failed to parse date, using current date instead")
+			referenceDate = util.GetReferenceDate(now)
+		} else {
+			// Use the parsed date as the reference date
+			referenceDate = time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, time.UTC)
+		}
+	} else {
+		// Use local time (not UTC) to ensure we get the correct reference date based on the user's local date.
+		// This is crucial for correct operation when the local date differs from the UTC date
+		// (e.g., at 00:38 CEST, which is 22:38 UTC of the previous day).
+		referenceDate = util.GetReferenceDate(now)
+	}
 
 	log.Info().
 		Time("local_time", now).
@@ -219,9 +240,15 @@ func displayTopDomains(domains []domain.DomainInfo) {
 		return domains[i].Score > domains[j].Score
 	})
 
+	// Get the expiry date from the first domain if available
+	expiryDateStr := "on the specified date"
+	if len(domains) > 0 {
+		expiryDateStr = "on " + domains[0].ExpiryDate.Format("2006-01-02")
+	}
+
 	// Display top domains
-	log.Info().Int("total", len(domains)).Msg("Found domains expiring today")
-	fmt.Println("\nTop valuable domains expiring today:")
+	log.Info().Int("total", len(domains)).Str("expiry_date", expiryDateStr).Msg("Found domains expiring on the specified date")
+	fmt.Printf("\nTop valuable domains expiring %s:\n", expiryDateStr)
 	fmt.Println("======================================")
 
 	// Print header with explanation
